@@ -2,20 +2,148 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import {
   Menu, Plus, X, Search, Bot, Send, Settings, Bell, User, HelpCircle,
-  MapPin, Gauge, Maximize2, ChevronRight, RefreshCw, Sun, Moon,
-  Cloud, CloudSun, CloudMoon, CloudRain, CloudRainWind, CloudSnow, CloudLightning,
-  CloudFog, CloudDrizzle, Thermometer, Check, Loader2, Trash2, Navigation,
+  MapPin, Gauge, Maximize2, ChevronRight, RefreshCw,
+  Thermometer, Check, Loader2, Trash2, Navigation,
   Droplets, Sunrise, Sunset, LocateFixed
 } from 'lucide-react';
 import './styles.css';
 
 /* ------------------------------------------------------------------ */
-/* Constants & lookups                                                 */
+/* Illustrated weather icons (flat, colorful — not line icons)         */
 /* ------------------------------------------------------------------ */
 
+function IconBase({ size, className, children, viewBox = '0 0 64 64' }) {
+  return (
+    <svg width={size} height={size} viewBox={viewBox} className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+      {children}
+    </svg>
+  );
+}
+
+const cloudPuff = (fill, stroke) => (
+  <path d="M18 44c-6.6 0-12-5.2-12-11.6 0-6 4.6-11 10.6-11.6C18.6 14.4 25 9.5 32.5 9.5c8 0 14.8 5.6 16.3 13.1 6 .8 10.7 5.9 10.7 12 0 6.7-5.6 12.2-12.5 12.2H18z" fill={fill} stroke={stroke} strokeWidth="1.5" strokeLinejoin="round" />
+);
+
+function SunIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <g stroke="#FFA733" strokeWidth="3.2" strokeLinecap="round">
+        <path d="M32 4v6M32 54v6M60 32h-6M10 32H4M51.5 12.5l-4.2 4.2M16.7 47.3l-4.2 4.2M51.5 51.5l-4.2-4.2M16.7 16.7l-4.2-4.2" />
+      </g>
+      <circle cx="32" cy="32" r="15" fill="#FFC64B" stroke="#FFA733" strokeWidth="1.5" />
+    </IconBase>
+  );
+}
+
+function MoonIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <path d="M42 8a22 22 0 1 0 14 39.4A22 22 0 0 1 42 8z" fill="#B9C6E8" stroke="#8FA0D6" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="30" cy="24" r="2.4" fill="#8FA0D6" />
+      <circle cx="40" cy="36" r="1.6" fill="#8FA0D6" />
+    </IconBase>
+  );
+}
+
+function CloudIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      {cloudPuff('#F3F7FC', '#C4D2E6')}
+    </IconBase>
+  );
+}
+
+function CloudSunIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <g stroke="#FFA733" strokeWidth="2.6" strokeLinecap="round">
+        <path d="M44 8v4.5M60 24h-4.5M27 14l3.2 3.2M56.8 14l-3.2 3.2" />
+      </g>
+      <circle cx="44" cy="24" r="10.5" fill="#FFC64B" stroke="#FFA733" strokeWidth="1.5" />
+      <path d="M14 48c-5.7 0-10.4-4.5-10.4-10 0-5.2 4-9.5 9.2-10 1.1-6.5 6.8-11.4 13.7-11.4 6.9 0 12.7 4.8 13.9 11.2 5.2.7 9.2 5.1 9.2 10.4 0 5.8-4.8 10.5-10.8 10.5H14z" fill="#F3F7FC" stroke="#C4D2E6" strokeWidth="1.5" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function CloudMoonIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <path d="M50 8a13 13 0 1 0 8.3 23A13 13 0 0 1 50 8z" fill="#C7D2EE" stroke="#9AABDA" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M14 48c-5.7 0-10.4-4.5-10.4-10 0-5.2 4-9.5 9.2-10 1.1-6.5 6.8-11.4 13.7-11.4 6.9 0 12.7 4.8 13.9 11.2 5.2.7 9.2 5.1 9.2 10.4 0 5.8-4.8 10.5-10.8 10.5H14z" fill="#F3F7FC" stroke="#C4D2E6" strokeWidth="1.5" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function CloudFogIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <path d="M18 38c-6.1 0-11-4.7-11-10.5 0-5.4 4.2-9.9 9.6-10.4C17.5 11 23.4 6.5 30.4 6.5c7.2 0 13.3 5 14.7 11.8 5.4.7 9.6 5.3 9.6 10.8 0 3.2-1.4 6-3.7 8H18z" fill="#DCE4F0" stroke="#B7C4DB" strokeWidth="1.5" strokeLinejoin="round" />
+      <g stroke="#8FA0C4" strokeWidth="3.2" strokeLinecap="round">
+        <path d="M10 44h44M14 51h36M18 58h28" />
+      </g>
+    </IconBase>
+  );
+}
+
+function CloudDrizzleIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      {cloudPuff('#EAF1FA', '#C4D2E6')}
+      <g stroke="#5B9CF2" strokeWidth="3" strokeLinecap="round">
+        <path d="M22 50l-2 4M32 50l-2 4M42 50l-2 4" />
+      </g>
+    </IconBase>
+  );
+}
+
+function CloudRainIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      {cloudPuff('#E6EEFA', '#C4D2E6')}
+      <g stroke="#4F86F7" strokeWidth="3.4" strokeLinecap="round">
+        <path d="M20 49l-3 7M32 49l-3 7M44 49l-3 7" />
+      </g>
+    </IconBase>
+  );
+}
+
+function CloudRainWindIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      {cloudPuff('#DDE8FA', '#B6C7E4')}
+      <g stroke="#3D6FE0" strokeWidth="3.4" strokeLinecap="round">
+        <path d="M18 48l-4 8M28 48l-4 8M38 48l-4 8M48 48l-3 6" />
+      </g>
+      <path d="M6 20h10M4 26h7" stroke="#B6C7E4" strokeWidth="2.4" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function CloudSnowIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      {cloudPuff('#EEF3FB', '#C4D2E6')}
+      <g fill="#9DC0F0">
+        <circle cx="20" cy="52" r="2.6" /><circle cx="32" cy="55" r="2.6" /><circle cx="44" cy="52" r="2.6" />
+      </g>
+    </IconBase>
+  );
+}
+
+function CloudLightningIcon({ size = 22, className = '' }) {
+  return (
+    <IconBase size={size} className={className}>
+      <path d="M18 40c-6.1 0-11-4.7-11-10.5 0-5.4 4.2-9.9 9.6-10.4C17.5 13 23.4 8.5 30.4 8.5c7.2 0 13.3 5 14.7 11.8 5.4.7 9.6 5.3 9.6 10.8 0 5.4-4.5 9.9-10.1 9.9H18z" fill="#D9E1F5" stroke="#AFC0E2" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M32 40l-7 12h6l-3 10 11-14h-6l4-8z" fill="#FFC64B" stroke="#FFA733" strokeWidth="1.2" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
 const ICONS = {
-  Sun, Moon, CloudSun, CloudMoon, Cloud, CloudFog, CloudDrizzle,
-  CloudRain, CloudRainWind, CloudSnow, CloudLightning
+  Sun: SunIcon, Moon: MoonIcon, CloudSun: CloudSunIcon, CloudMoon: CloudMoonIcon,
+  Cloud: CloudIcon, CloudFog: CloudFogIcon, CloudDrizzle: CloudDrizzleIcon,
+  CloudRain: CloudRainIcon, CloudRainWind: CloudRainWindIcon, CloudSnow: CloudSnowIcon,
+  CloudLightning: CloudLightningIcon
 };
 
 const WMAP = {
@@ -311,8 +439,8 @@ function WeatherPanel({ weather, clock, onMenu, onAdd, unit, onExpandMap }) {
           <span>{current.condition}</span>
         </div>
         <div className="rw-now-range">
-          <span><Sun size={13} /> {round(daily[0]?.high)}{u}</span>
-          <span><Moon size={13} /> {round(daily[0]?.low)}{u}</span>
+          <span><SunIcon size={13} /> {round(daily[0]?.high)}{u}</span>
+          <span><MoonIcon size={13} /> {round(daily[0]?.low)}{u}</span>
         </div>
         <div className="rw-now-temp">{round(current.temperature)}<sup>{u}</sup></div>
         <div className="rw-now-feels">Feels like {round(current.feelsLike)}{u}</div>
@@ -787,7 +915,7 @@ function App() {
       <Skyline code={weather?.current?.code} isDay={weather?.current?.isDay ?? true} />
 
       <div className="rw-topbar">
-        <div className="rw-brand"><CloudSun size={18} /> Weather</div>
+        <div className="rw-brand"><CloudSunIcon size={18} /> Weather</div>
         <div className="rw-topbar-actions">
           <div className="rw-unit-toggle">
             <button className={unit === 'imperial' ? 'active' : ''} onClick={() => setUnit('imperial')}>°F</button>
