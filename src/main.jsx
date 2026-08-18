@@ -869,6 +869,71 @@ function App() {
     };
   }, []);
 
+  // ── Client-side local answer engine ─────────────────────────────────
+  // Mirrors server.js localAnswer so the chatbot always responds even
+  // when the Express backend is not running.
+  const localAnswerClient = useCallback((message, w) => {
+    const q = String(message || '').trim().toLowerCase();
+    const c = w?.current || {};
+    const daily = w?.daily || [];
+    const city = w?.city || 'your location';
+    const unit = w?.unit === 'metric' ? '°C' : '°F';
+    const today = daily[0];
+    const rnd = n => Math.round(Number(n || 0));
+
+    const isGreetMsg = /^(hi|hello|hey+|hiya|yo|salam|salaam|assalam[- ]?o?[- ]?alaikum|aoa|good\s*(morning|afternoon|evening|night)|hola|bonjour|hallo|مرحبا|سلام|ہیلو)\s*[!.?]*$/i.test(q);
+    if (isGreetMsg) {
+      const hasData = c.temperature !== undefined && c.temperature !== null;
+      if (hasData) return `Hey! 👋 It's currently ${rnd(c.temperature)}${unit} and ${(c.condition || 'clear').toLowerCase()} in ${city}. Ask me about rain chances, wind, what to wear, sunrise/sunset, or the week's forecast!`;
+      return `Hey! 👋 I'm your Weather assistant for ${city}. Ask me about rain chances, wind, what to wear, sunrise/sunset, or the week's forecast!`;
+    }
+    if (/umbrella|rain\s*today|will it rain|chance of rain/i.test(q)) {
+      const chance = today?.precipChance ?? 0;
+      if (chance >= 50) return `Yes — bring an umbrella. There's a ${chance}% chance of precipitation in ${city} today.`;
+      if (chance >= 20) return `Maybe pack a light umbrella — ${city} has about a ${chance}% chance of rain today.`;
+      return `You should be fine without one — only a ${chance}% chance of rain in ${city} today.`;
+    }
+    if (/what.*wear|dress|jacket|coat/i.test(q)) {
+      const t = rnd(c.temperature);
+      if (t <= (w?.unit !== 'metric' ? 40 : 4)) return `It's ${t}${unit} in ${city} — wear a heavy coat, gloves, and layer up.`;
+      if (t <= (w?.unit !== 'metric' ? 60 : 15)) return `It's ${t}${unit} in ${city} — a jacket or light coat is a good call.`;
+      if (t <= (w?.unit !== 'metric' ? 75 : 24)) return `It's a mild ${t}${unit} in ${city} — a light layer should be enough.`;
+      return `It's ${t}${unit} in ${city} — dress light, it's warm out.`;
+    }
+    if (/wind/i.test(q)) return `Wind in ${city} is currently ${rnd(c.windSpeed)} ${w?.unit === 'metric' ? 'km/h' : 'mph'} from the ${c.windDir || '—'}.`;
+    if (/humid/i.test(q)) return `Humidity in ${city} is currently ${rnd(c.humidity)}%.`;
+    if (/pressure|barometer/i.test(q)) return `Barometric pressure in ${city} is ${Number(c.pressure || 0).toFixed(2)} inHg right now.`;
+    if (/sunrise/i.test(q)) return `Sunrise in ${city} today is at ${today?.sunrise || '—'}.`;
+    if (/sunset/i.test(q)) return `Sunset in ${city} today is at ${today?.sunset || '—'}.`;
+    if (/tomorrow/i.test(q)) {
+      const d = daily[1];
+      if (!d) return `I don't have tomorrow's data loaded yet — try refreshing the forecast.`;
+      return `Tomorrow in ${city}: ${d.condition}, high of ${rnd(d.high)}${unit} and a low of ${rnd(d.low)}${unit}, with a ${d.precipChance}% chance of rain.`;
+    }
+    if (/weekend/i.test(q)) {
+      const wd = daily.filter(d => d.isWeekend).slice(0, 2);
+      if (!wd.length) return `I don't have the weekend forecast loaded yet.`;
+      return wd.map(d => `${d.label}: ${d.condition}, ${rnd(d.high)}${unit}/${rnd(d.low)}${unit}`).join(' · ');
+    }
+    if (/hottest|warmest/i.test(q)) {
+      const max = daily.reduce((a, b) => (b.high > (a?.high ?? -999) ? b : a), null);
+      if (!max) return `Forecast data isn't loaded yet.`;
+      return `${max.label} looks like the warmest day this week in ${city}, topping out at ${rnd(max.high)}${unit}.`;
+    }
+    if (/coldest|coolest/i.test(q)) {
+      const min = daily.reduce((a, b) => (b.low < (a?.low ?? 999) ? b : a), null);
+      if (!min) return `Forecast data isn't loaded yet.`;
+      return `${min.label} looks like the coolest day this week in ${city}, dropping to ${rnd(min.low)}${unit}.`;
+    }
+    if (/temp|hot|cold|degree/i.test(q)) {
+      return `It's currently ${rnd(c.temperature)}${unit} in ${city}, feels like ${rnd(c.feelsLike)}${unit}. Today's range is ${rnd(today?.low)}${unit}–${rnd(today?.high)}${unit}.`;
+    }
+    if (/week|forecast|next.*days/i.test(q)) {
+      return daily.slice(0, 5).map(d => `${d.label}: ${d.condition}, ${rnd(d.high)}${unit}/${rnd(d.low)}${unit}`).join(' · ');
+    }
+    return `Right now in ${city}: ${c.condition || 'Clear'}, ${rnd(c.temperature)}${unit}. Ask me about rain chances, wind, sunrise/sunset, or the coming week.`;
+  }, []);
+
   const sendChat = async (text) => {
     const trimmed = String(text || '').trim();
     if (!trimmed) return;
@@ -890,19 +955,38 @@ function App() {
         return;
       }
 
-      const r = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: trimmed,
-          weather: buildWeatherPayload(targetWeather || weather),
-          conversation: messages.slice(-8)
-        })
-      });
-      const j = await r.json();
-      setMessages(prev => [...prev, { role: 'bot', text: j.reply || 'Sorry, I couldn\u2019t fetch that just now.' }]);
-    } catch {
-      setMessages(prev => [...prev, { role: 'bot', text: 'The assistant is offline right now \u2014 try again in a moment.' }]);
+      const activeWeather = buildWeatherPayload(targetWeather || weather);
+
+      let reply = null;
+      try {
+        const r = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(12000),
+          body: JSON.stringify({
+            message: trimmed,
+            weather: activeWeather,
+            conversation: messages.slice(-8)
+          })
+        });
+        if (r.ok) {
+          const j = await r.json();
+          reply = j.reply || null;
+        }
+      } catch {
+        // Server unreachable — fall through to local answer below
+      }
+
+      // Always have an answer: server reply → local engine → generic fallback
+      if (!reply) {
+        reply = localAnswerClient(trimmed, targetWeather || weather);
+      }
+
+      setMessages(prev => [...prev, { role: 'bot', text: reply }]);
+    } catch (err) {
+      // Last-resort: still answer from local engine rather than showing "offline"
+      const fallback = localAnswerClient(trimmed, weather);
+      setMessages(prev => [...prev, { role: 'bot', text: fallback }]);
     } finally {
       setChatLoading(false);
     }
