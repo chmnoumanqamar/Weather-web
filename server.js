@@ -9,7 +9,7 @@ import { createServer as createViteServer } from 'vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT || 5173);
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-pro-preview';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 app.use(cors());
@@ -170,8 +170,8 @@ function localAnswer(message, weather) {
     const advice = h >= 70
       ? 'Stay cool, choose breathable fabrics, and stay hydrated. High humidity makes heat feel more intense.'
       : h <= 30
-      ? 'Dry air can cause skin irritation and dehydration. Use moisturiser and drink plenty of water.'
-      : 'Conditions are comfortable for most outdoor activities.';
+        ? 'Dry air can cause skin irritation and dehydration. Use moisturiser and drink plenty of water.'
+        : 'Conditions are comfortable for most outdoor activities.';
     return `**Humidity in ${city}:**\n\n💧 **${h}%** — ${desc}\n🌡️ Estimated dew point: **${dewPoint}${unit}**\n\n💡 ${advice}`;
   }
 
