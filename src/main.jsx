@@ -869,69 +869,216 @@ function App() {
     };
   }, []);
 
-  // ── Client-side local answer engine ─────────────────────────────────
-  // Mirrors server.js localAnswer so the chatbot always responds even
-  // when the Express backend is not running.
+  // ── Client-side expert answer engine ──────────────────────────────────────
+  // Full-featured fallback matching server.js — mature, specific, helpful for
+  // all weather question types, even when the backend is unreachable.
   const localAnswerClient = useCallback((message, w) => {
     const q = String(message || '').trim().toLowerCase();
     const c = w?.current || {};
     const daily = w?.daily || [];
     const city = w?.city || 'your location';
-    const unit = w?.unit === 'metric' ? '°C' : '°F';
+    const isMetric = w?.unit === 'metric';
+    const unit = isMetric ? '°C' : '°F';
+    const speedUnit = isMetric ? 'km/h' : 'mph';
     const today = daily[0];
+    const tomorrow = daily[1];
     const rnd = n => Math.round(Number(n || 0));
 
+    const descHumidity = h => {
+      if (h >= 80) return 'very high (oppressively humid)';
+      if (h >= 60) return 'moderately high (feels sticky)';
+      if (h >= 40) return 'comfortable';
+      if (h >= 20) return 'low (dry air)';
+      return 'very low (extremely dry)';
+    };
+    const descWind = speed => {
+      const kmh = isMetric ? speed : speed * 1.60934;
+      if (kmh >= 89) return 'storm-force (dangerous — stay indoors)';
+      if (kmh >= 62) return 'strong gale (very difficult to walk against)';
+      if (kmh >= 39) return 'fresh gale (twigs break, walking impeded)';
+      if (kmh >= 29) return 'strong breeze (large branches move)';
+      if (kmh >= 20) return 'fresh breeze (small trees sway)';
+      if (kmh >= 12) return 'gentle breeze (leaves rustle)';
+      return 'calm to light';
+    };
+    const precipDesc = chance => {
+      if (chance >= 80) return 'almost certain';
+      if (chance >= 60) return 'likely';
+      if (chance >= 40) return 'possible';
+      if (chance >= 15) return 'slight chance';
+      return 'very unlikely';
+    };
+
+    // Greeting
     const isGreetMsg = /^(hi|hello|hey+|hiya|yo|salam|salaam|assalam[- ]?o?[- ]?alaikum|aoa|good\s*(morning|afternoon|evening|night)|hola|bonjour|hallo|مرحبا|سلام|ہیلو)\s*[!.?]*$/i.test(q);
     if (isGreetMsg) {
-      const hasData = c.temperature !== undefined && c.temperature !== null;
-      if (hasData) return `Hey! 👋 It's currently ${rnd(c.temperature)}${unit} and ${(c.condition || 'clear').toLowerCase()} in ${city}. Ask me about rain chances, wind, what to wear, sunrise/sunset, or the week's forecast!`;
-      return `Hey! 👋 I'm your Weather assistant for ${city}. Ask me about rain chances, wind, what to wear, sunrise/sunset, or the week's forecast!`;
-    }
-    if (/umbrella|rain\s*today|will it rain|chance of rain/i.test(q)) {
-      const chance = today?.precipChance ?? 0;
-      if (chance >= 50) return `Yes — bring an umbrella. There's a ${chance}% chance of precipitation in ${city} today.`;
-      if (chance >= 20) return `Maybe pack a light umbrella — ${city} has about a ${chance}% chance of rain today.`;
-      return `You should be fine without one — only a ${chance}% chance of rain in ${city} today.`;
-    }
-    if (/what.*wear|dress|jacket|coat/i.test(q)) {
       const t = rnd(c.temperature);
-      if (t <= (w?.unit !== 'metric' ? 40 : 4)) return `It's ${t}${unit} in ${city} — wear a heavy coat, gloves, and layer up.`;
-      if (t <= (w?.unit !== 'metric' ? 60 : 15)) return `It's ${t}${unit} in ${city} — a jacket or light coat is a good call.`;
-      if (t <= (w?.unit !== 'metric' ? 75 : 24)) return `It's a mild ${t}${unit} in ${city} — a light layer should be enough.`;
-      return `It's ${t}${unit} in ${city} — dress light, it's warm out.`;
+      const feels = rnd(c.feelsLike);
+      const cond = (c.condition || 'clear').toLowerCase();
+      const hasData = c.temperature !== undefined && c.temperature !== null;
+      if (hasData) {
+        const extra = (today?.precipChance ?? 0) >= 40
+          ? ` There's a ${today.precipChance}% chance of rain today — keep an umbrella handy.`
+          : '';
+        return `Hello! 👋 Right now in **${city}** it's **${t}${unit}** and ${cond}, feeling like ${feels}${unit}.${extra} I'm your weather expert — ask me anything about conditions, forecasts, what to wear, UV, or planning around the weather.`;
+      }
+      return `Hello! 👋 I'm your Weather AI for **${city}**. Ask me about conditions, forecasts, clothing advice, rain probability, wind, UV index, and more!`;
     }
-    if (/wind/i.test(q)) return `Wind in ${city} is currently ${rnd(c.windSpeed)} ${w?.unit === 'metric' ? 'km/h' : 'mph'} from the ${c.windDir || '—'}.`;
-    if (/humid/i.test(q)) return `Humidity in ${city} is currently ${rnd(c.humidity)}%.`;
-    if (/pressure|barometer/i.test(q)) return `Barometric pressure in ${city} is ${Number(c.pressure || 0).toFixed(2)} inHg right now.`;
-    if (/sunrise/i.test(q)) return `Sunrise in ${city} today is at ${today?.sunrise || '—'}.`;
-    if (/sunset/i.test(q)) return `Sunset in ${city} today is at ${today?.sunset || '—'}.`;
+
+    // Rain / Umbrella
+    if (/umbrella|will it rain|rain today|chance of rain|is it going to rain|precipitation/i.test(q)) {
+      const chance = today?.precipChance ?? 0;
+      const weekly = daily.slice(0, 7).filter(d => (d.precipChance ?? 0) >= 40);
+      const weeklyNote = weekly.length
+        ? ` Rain expected later this week on: ${weekly.map(d => `${d.label} (${d.precipChance}%)`).join(', ')}.`
+        : ' The rest of the week looks mostly dry.';
+      if (chance >= 70) return `☔ **Yes, definitely bring an umbrella.** There's a **${chance}% chance of precipitation** in ${city} today — high enough to expect real rain.${weeklyNote}`;
+      if (chance >= 40) return `🎂 **Probably worth packing an umbrella.** Rain probability today is **${chance}%** — noticeably likely. Showers are possible at any time.${weeklyNote}`;
+      if (chance >= 15) return `🌦️ **Rain is possible but not likely** — ${chance}% chance in ${city} today. A compact umbrella wouldn't hurt for long outings.${weeklyNote}`;
+      return `☀️ **No umbrella needed.** Only a **${chance}%** chance of precipitation in ${city} today — essentially negligible.${weeklyNote}`;
+    }
+
+    // What to wear
+    if (/what.*wear|dress|outfit|clothing|jacket|coat|attire|how.*dress/i.test(q)) {
+      const t = rnd(c.temperature);
+      const feels = rnd(c.feelsLike);
+      const hum = rnd(c.humidity);
+      const rain = today?.precipChance ?? 0;
+      const rainNote = rain >= 40 ? '\n🎂 **Waterproof layer recommended** — decent chance of rain today.' : '';
+      const humNote = hum >= 70 ? '\n💧 High humidity — choose breathable fabrics like cotton or linen.' : '';
+      const freezing = isMetric ? 0 : 32;
+      let outfit;
+      if (feels <= freezing) outfit = '🧭 **Heavy winter coat**, thermal underlayer, warm hat, scarf, and insulated gloves. Frostbite risk — cover all exposed skin.';
+      else if (feels <= (isMetric ? 8 : 46)) outfit = '🧭 **Heavy coat or parka** with a warm mid-layer (fleece or wool sweater). Gloves and a hat are a smart idea.';
+      else if (feels <= (isMetric ? 15 : 59)) outfit = '🧣 **Light to medium jacket** — denim, bomber, or hoodie. Long trousers recommended.';
+      else if (feels <= (isMetric ? 22 : 72)) outfit = '👕 **Light layers** — a long-sleeve shirt or thin cardigan. Jeans or chinos work well.';
+      else if (feels <= (isMetric ? 28 : 82)) outfit = '👗 **Light, casual clothes** — t-shirt and light trousers or shorts. Very comfortable weather.';
+      else outfit = '🩲 **Minimal, breathable clothing** — light cotton or moisture-wicking fabrics. Stay hydrated and seek shade during peak heat.';
+      return `**Clothing advice for ${city} (${t}${unit}, feels like ${feels}${unit}):**\n\n${outfit}${rainNote}${humNote}`;
+    }
+
+    // Temperature
+    if (/\btemp(erature)?\b|how hot|how cold|how warm|degrees|thermometer/i.test(q)) {
+      const t = rnd(c.temperature);
+      const feels = rnd(c.feelsLike);
+      const hi = rnd(today?.high);
+      const lo = rnd(today?.low);
+      const swing = hi - lo;
+      return `**Temperature in ${city}:**\n\n🌡️ Currently **${t}${unit}** (feels like **${feels}${unit}**)\n📈 Today's high: **${hi}${unit}** · 📉 Low: **${lo}${unit}**\n\nThe ${swing}${unit} daily swing is ${swing > (isMetric ? 12 : 22) ? 'quite large — dress in layers' : 'relatively mild'}.`;
+    }
+
+    // Wind
+    if (/wind|breeze|gust|gale|blustery/i.test(q)) {
+      const speed = rnd(c.windSpeed);
+      const dir = c.windDir || '—';
+      const desc = descWind(speed);
+      const danger = speed > (isMetric ? 60 : 37) ? '\n⚠️ **Strong winds** — secure loose outdoor items and avoid driving high-sided vehicles.' : '';
+      return `**Wind in ${city}:**\n\n💨 **${speed} ${speedUnit}** from the **${dir}**\n📊 ${desc}${danger}`;
+    }
+
+    // Humidity
+    if (/humid(ity)?|moisture|damp|muggy|sticky|dry air/i.test(q)) {
+      const h = rnd(c.humidity);
+      const desc = descHumidity(h);
+      const advice = h >= 70
+        ? 'Stay cool, wear breathable fabrics, and drink plenty of water. High humidity makes heat feel much more intense.'
+        : h <= 30
+        ? 'Dry air can cause skin irritation and dehydration. Use moisturiser and drink extra water.'
+        : 'Conditions are comfortable for most people and activities.';
+      return `**Humidity in ${city}:**\n\n💧 **${h}%** — ${desc}\n\n💡 ${advice}`;
+    }
+
+    // Pressure
+    if (/pressure|barometer|barometric|hpa/i.test(q)) {
+      const p = Number(c.pressure || 0);
+      const trend = p < 1000 ? 'low — stormy or unsettled weather likely' : p < 1013 ? 'slightly below normal — change possible' : p < 1025 ? 'normal — stable, settled conditions' : 'high — fair and settled weather expected';
+      return `**Barometric pressure in ${city}:**\n\n📊 **${p.toFixed(1)} hPa**\n📈 ${trend}\n\nA rapid pressure drop signals an approaching storm; rising pressure means clearing skies.`;
+    }
+
+    // UV
+    if (/uv|ultraviolet|sunburn|sun protection|spf/i.test(q)) {
+      const uv = c.uv;
+      if (!uv && uv !== 0) return `UV index data isn't in the current snapshot for ${city}. As a rule, UV is highest between **10am and 4pm** — apply SPF 30+ if you'll be outdoors for more than 20 minutes.`;
+      const risk = uv <= 2 ? 'Low — no protection needed' : uv <= 5 ? 'Moderate — wear sunscreen for extended outdoor time' : uv <= 7 ? 'High — SPF 30+, hat, and sunglasses recommended' : uv <= 10 ? 'Very high — minimise exposure 10am–4pm' : 'Extreme — avoid outdoor exposure; full protective clothing essential';
+      return `**UV Index in ${city}:** **${uv}** — ${risk}\n\n☀️ Peak UV hours are **10am–4pm**. Even on cloudy days, up to 80% of UV rays penetrate cloud cover.`;
+    }
+
+    // Sunrise
+    if (/sunrise|dawn|first light/i.test(q)) {
+      const sr = today?.sunrise || '—';
+      return `🌅 **Sunrise in ${city}** today: **${sr}**\n\nGolden hour (warm, soft light ideal for photography) lasts roughly 30–60 minutes after sunrise.`;
+    }
+
+    // Sunset
+    if (/sunset|dusk|golden hour|nightfall/i.test(q)) {
+      const ss = today?.sunset || '—';
+      return `🌇 **Sunset in ${city}** today: **${ss}**\n\nGolden hour begins about 60 minutes before sunset — ideal for photography, evening walks, and outdoor dining.`;
+    }
+
+    // Tomorrow
     if (/tomorrow/i.test(q)) {
-      const d = daily[1];
-      if (!d) return `I don't have tomorrow's data loaded yet — try refreshing the forecast.`;
-      return `Tomorrow in ${city}: ${d.condition}, high of ${rnd(d.high)}${unit} and a low of ${rnd(d.low)}${unit}, with a ${d.precipChance}% chance of rain.`;
+      if (!tomorrow) return `Tomorrow's forecast isn't loaded yet for ${city}. Try refreshing the app.`;
+      const precip = tomorrow.precipChance ?? 0;
+      const advice = precip >= 40 ? 'Expect rain — have a jacket and umbrella ready.' : 'Looks like a relatively dry day.';
+      return `**Tomorrow's forecast for ${city}:**\n\n☁️ ${tomorrow.condition}\n📈 High: **${rnd(tomorrow.high)}${unit}** · 📉 Low: **${rnd(tomorrow.low)}${unit}**\n🌧️ Rain: **${precip}%** — ${precipDesc(precip)}\n\n💡 ${advice}`;
     }
-    if (/weekend/i.test(q)) {
+
+    // Weekend
+    if (/weekend|saturday|sunday/i.test(q)) {
       const wd = daily.filter(d => d.isWeekend).slice(0, 2);
-      if (!wd.length) return `I don't have the weekend forecast loaded yet.`;
-      return wd.map(d => `${d.label}: ${d.condition}, ${rnd(d.high)}${unit}/${rnd(d.low)}${unit}`).join(' · ');
+      if (!wd.length) return `Weekend forecast data isn't available yet for ${city}.`;
+      const lines = wd.map(d => `**${d.label}:** ${d.condition} · High ${rnd(d.high)}${unit} / Low ${rnd(d.low)}${unit} · Rain: ${d.precipChance ?? 0}%`).join('\n');
+      const outdoor = wd.every(d => (d.precipChance ?? 0) < 30) ? 'Looks like a great weekend for outdoor activities! 🎉' : 'You may want to plan some indoor backup options.';
+      return `**Weekend forecast for ${city}:**\n\n${lines}\n\n💡 ${outdoor}`;
     }
-    if (/hottest|warmest/i.test(q)) {
-      const max = daily.reduce((a, b) => (b.high > (a?.high ?? -999) ? b : a), null);
-      if (!max) return `Forecast data isn't loaded yet.`;
-      return `${max.label} looks like the warmest day this week in ${city}, topping out at ${rnd(max.high)}${unit}.`;
+
+    // Weekly forecast
+    if (/week|7.?day|next.*day|forecast|coming day/i.test(q)) {
+      if (!daily.length) return `Weekly forecast data isn't loaded yet for ${city}.`;
+      const lines = daily.slice(0, 7).map(d => `**${d.label}:** ${d.condition} · ${rnd(d.high)}${unit}/${rnd(d.low)}${unit} · 🌧️ ${d.precipChance ?? 0}%`).join('\n');
+      const maxDay = daily.slice(0, 7).reduce((a, b) => b.high > (a?.high ?? -999) ? b : a, null);
+      const minDay = daily.slice(0, 7).reduce((a, b) => b.low < (a?.low ?? 999) ? b : a, null);
+      return `**7-Day Forecast for ${city}:**\n\n${lines}\n\n🔥 Hottest: **${maxDay?.label}** at ${rnd(maxDay?.high)}${unit} · ❄️ Coldest night: **${minDay?.label}** at ${rnd(minDay?.low)}${unit}`;
     }
-    if (/coldest|coolest/i.test(q)) {
-      const min = daily.reduce((a, b) => (b.low < (a?.low ?? 999) ? b : a), null);
-      if (!min) return `Forecast data isn't loaded yet.`;
-      return `${min.label} looks like the coolest day this week in ${city}, dropping to ${rnd(min.low)}${unit}.`;
+
+    // Hottest
+    if (/hottest|warmest|highest temp/i.test(q)) {
+      const max = daily.reduce((a, b) => b.high > (a?.high ?? -999) ? b : a, null);
+      if (!max) return `Forecast data isn't loaded yet for ${city}.`;
+      return `🔥 **${max.label}** is the hottest day in the forecast for ${city}, with a high of **${rnd(max.high)}${unit}**. Schedule strenuous activities for early morning or after 5pm to avoid peak heat.`;
     }
-    if (/temp|hot|cold|degree/i.test(q)) {
-      return `It's currently ${rnd(c.temperature)}${unit} in ${city}, feels like ${rnd(c.feelsLike)}${unit}. Today's range is ${rnd(today?.low)}${unit}–${rnd(today?.high)}${unit}.`;
+
+    // Coldest
+    if (/coldest|coolest|lowest temp/i.test(q)) {
+      const min = daily.reduce((a, b) => b.low < (a?.low ?? 999) ? b : a, null);
+      if (!min) return `Forecast data isn't loaded yet for ${city}.`;
+      const freezing = isMetric ? 0 : 32;
+      return `❄️ **${min.label}** is the coldest night in the forecast for ${city}, dropping to **${rnd(min.low)}${unit}**. ${rnd(min.low) <= freezing ? 'Freezing temperatures expected — protect pipes, plants, and pets.' : 'Layer up if going out at night.'}`;
     }
-    if (/week|forecast|next.*days/i.test(q)) {
-      return daily.slice(0, 5).map(d => `${d.label}: ${d.condition}, ${rnd(d.high)}${unit}/${rnd(d.low)}${unit}`).join(' · ');
+
+    // Outdoor safety
+    if (/safe.*outside|go outside|outdoor|picnic|hike|run|jog|exercise|sport/i.test(q)) {
+      const t = rnd(c.temperature);
+      const feels = rnd(c.feelsLike);
+      const rain = today?.precipChance ?? 0;
+      const wind = rnd(c.windSpeed);
+      const issues = [];
+      if (rain >= 60) issues.push('heavy rain likely');
+      if (wind > (isMetric ? 60 : 37)) issues.push('dangerous wind speeds');
+      if (feels > (isMetric ? 38 : 100)) issues.push('extreme heat (heat stroke risk)');
+      if (feels < (isMetric ? -10 : 14)) issues.push('extreme cold (frostbite risk)');
+      if (issues.length) {
+        return `⚠️ **Caution for outdoor activity in ${city}:** ${issues.join(', ')}.\n\nCurrent: ${t}${unit} (feels like ${feels}${unit}), wind ${wind} ${speedUnit}, rain ${rain}%. Consider rescheduling or taking full precautions.`;
+      }
+      return `✅ **Conditions look good for outdoor activity in ${city}!**\n\nIt's ${t}${unit} (feels like ${feels}${unit}), wind ${wind} ${speedUnit}, rain chance only ${rain}%. ${today?.sunrise && today?.sunset ? `Daylight from ${today.sunrise} to ${today.sunset}.` : ''} Enjoy! 🌿`;
     }
-    return `Right now in ${city}: ${c.condition || 'Clear'}, ${rnd(c.temperature)}${unit}. Ask me about rain chances, wind, sunrise/sunset, or the coming week.`;
+
+    // Generic fallback — still rich and contextual
+    const t = rnd(c.temperature);
+    const feels = rnd(c.feelsLike);
+    const rain = today?.precipChance ?? 0;
+    const wind = rnd(c.windSpeed);
+    return `**${city} right now:** ${c.condition || 'Clear'} · **${t}${unit}** (feels like ${feels}${unit}) · 💧 ${rnd(c.humidity)}% humidity · 💨 ${wind} ${speedUnit} · 🌧️ ${rain}% rain chance\n\nAsk me about temperature, rain, wind, humidity, UV, what to wear, weekly forecast, sunrise/sunset, outdoor safety, and more!`;
   }, []);
 
   const sendChat = async (text) => {
